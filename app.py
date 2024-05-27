@@ -31,9 +31,7 @@ except ImportError as e:
 
 app = Flask(__name__)
 
-
 # LOADING DEFAULT DATASETS
-
 # URL to fetch the ImageNet class index to label mapping
 url = 'https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json'
 response = requests.get(url)
@@ -45,18 +43,22 @@ with open('imagenet_labels.txt', 'w') as f:
     for label in imagenet_labels:
         f.write(f"{label}\n")
 logging.info("ImageNet labels have been saved to imagenet_labels.txt")
-# Load CIFAR-10 dataset
+
+# Load small subset of datasets
 (x_train_cifar10, y_train_cifar10), (x_test_cifar10, y_test_cifar10) = cifar10.load_data()
 cifar10_labels = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
-# Load MNIST dataset
+x_test_cifar10, y_test_cifar10 = x_test_cifar10[:200], y_test_cifar10[:200]  # Load only a small subset
+
 (x_train_mnist, y_train_mnist), (x_test_mnist, y_test_mnist) = mnist.load_data()
+x_test_mnist, y_test_mnist = x_test_mnist[:200], y_test_mnist[:200]  # Load only a small subset
 x_train_mnist = np.expand_dims(x_train_mnist, axis=-1)
 x_test_mnist = np.expand_dims(x_test_mnist, axis=-1)
 x_train_mnist = np.repeat(x_train_mnist, 3, axis=-1)
 x_test_mnist = np.repeat(x_test_mnist, 3, axis=-1)
 mnist_labels = [str(i) for i in range(10)]
-# Load Fashion MNIST dataset
+
 (x_train_fashion, y_train_fashion), (x_test_fashion, y_test_fashion) = fashion_mnist.load_data()
+x_test_fashion, y_test_fashion = x_test_fashion[:200], y_test_fashion[:200]  # Load only a small subset
 x_train_fashion = np.expand_dims(x_train_fashion, axis=-1)
 x_test_fashion = np.expand_dims(x_test_fashion, axis=-1)
 x_train_fashion = np.repeat(x_train_fashion, 3, axis=-1)
@@ -66,7 +68,7 @@ fashion_labels = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal
 # Global variable to control the classification process
 classification_active = False
 
-# LOADING DEFAULT MODELS
+# LOADING DEFAULT MODELS ON-DEMAND
 
 def load_model(model_cls, preprocess_input):
     base_model = model_cls(weights='imagenet', include_top=False)
@@ -75,14 +77,11 @@ def load_model(model_cls, preprocess_input):
     model = Model(inputs=base_model.input, outputs=predictions)
     return model, preprocess_input
 
-# Load pretrained models once at the start
-resnet_model, preprocess_input_resnet = load_model(ResNet50, preprocess_input_resnet)
-vgg_model, preprocess_input_vgg = load_model(VGG16, preprocess_input_vgg)
-
 def resize_image(image, target_size=(32, 32)):
     return tf.image.resize(image, target_size).numpy()
 
-def classify_image(image_array, model, preprocess_input):
+def classify_image(image_array, model_cls, preprocess_input):
+    model, preprocess_input = load_model(model_cls, preprocess_input)
     image_resized = resize_image(image_array)
     processed_img = preprocess_input(np.expand_dims(image_resized, axis=0))
     start_time = time.time()
@@ -96,8 +95,8 @@ def get_top_predictions(predictions, top_k=3):
     return [(i, predictions[0][i]) for i in class_indices]
 
 # Load CLIP model once at the start
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14")
-clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 def clip_classify(image_array, text_labels):
     image = Image.fromarray(image_array.astype('uint8'))
@@ -109,7 +108,6 @@ def clip_classify(image_array, text_labels):
     probs = logits_per_image.softmax(dim=1).tolist()
     elapsed_time = end_time - start_time
     return probs, elapsed_time
-
 
 # FLASK WEB INTERFACE
 
@@ -150,8 +148,8 @@ def classify():
                 image_array = np.array(image)
 
                 # Process and classify the image using each model
-                resnet_predictions, resnet_time = classify_image(image_array, resnet_model, preprocess_input_resnet)
-                vgg_predictions, vgg_time = classify_image(image_array, vgg_model, preprocess_input_vgg)
+                resnet_predictions, resnet_time = classify_image(image_array, ResNet50, preprocess_input_resnet)
+                vgg_predictions, vgg_time = classify_image(image_array, VGG16, preprocess_input_vgg)
                 clip_probs, clip_time = clip_classify(image_array, labels)
 
                 resnet_top_preds = get_top_predictions(resnet_predictions)
@@ -233,8 +231,8 @@ def classify():
 
                     y_true.append(actual_label_index)
 
-                    resnet_predictions, resnet_time = classify_image(test_image, resnet_model, preprocess_input_resnet)
-                    vgg_predictions, vgg_time = classify_image(test_image, vgg_model, preprocess_input_vgg)
+                    resnet_predictions, resnet_time = classify_image(test_image, ResNet50, preprocess_input_resnet)
+                    vgg_predictions, vgg_time = classify_image(test_image, VGG16, preprocess_input_vgg)
                     clip_probs, clip_time = clip_classify(test_image, labels)
 
                     resnet_top_preds = get_top_predictions(resnet_predictions)

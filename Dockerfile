@@ -1,25 +1,24 @@
-# Use the official Python image as a base image
-FROM python:3.9-slim
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    FLASK_APP=app.py
+# Use a more compatible base image
+FROM python:3.8-slim-buster
 
 # Set the working directory
 WORKDIR /app
 
 # Copy the requirements file
-COPY requirements.txt /app/
+COPY requirements.txt .
 
-# Install the dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the rest of the application code
-COPY . /app
+COPY . .
 
 # Expose the port the app runs on
 EXPOSE 5000
 
 # Run the application
-CMD ["flask", "run", "--host=0.0.0.0"]
+CMD ["python", "app.py"]
